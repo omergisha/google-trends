@@ -3,6 +3,8 @@
 use GuzzleHttp\Client;
 use GuzzleHttp\Cookie\CookieJar;
 use GuzzleHttp\Cookie\SetCookie;
+use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\TransferStats;
 
 class GoogleSession
 {
@@ -193,11 +195,11 @@ class GoogleSession
     public function authenticate()
     {
         // go to google.com to get some cookies
-        $request = $this->guzzleClient->createRequest('GET', 'http://www.google.com/ncr', ['cookies' => $this->cookieJar]);
+        $request = new Request('GET', 'http://www.google.com/ncr', ['cookies' => $this->cookieJar]);
         $response = $this->guzzleClient->send($request);
 
         // get google auth page html and fetch GALX
-        $request = $this->guzzleClient->createRequest('GET', self::AUTH_URL, ['cookies' => $this->cookieJar]);
+        $request = new Request('GET', self::AUTH_URL, ['cookies' => $this->cookieJar]);
         $response = $this->guzzleClient->send($request);
 
         $content = $response->getBody()->getContents();
@@ -209,6 +211,7 @@ class GoogleSession
 
         $params = [];
 
+        /** @var \DOMElement $input */
         foreach ($inputElements as $input) {
             $params[$input->getAttribute("name")] = $input->getAttribute("value");
         }
@@ -220,18 +223,18 @@ class GoogleSession
         $params['continue'] = 'http://www.google.com/trends';
 
         // authenticate
-        $request = $this->guzzleClient->createRequest('POST', self::AUTH_URL, ['cookies' => $this->cookieJar]);
-        $query = $request->getQuery();
-
-
-        foreach ($params as $key => $param) {
-            $query->set($key, $param);
-        }
+        $request = new Request('POST', self::AUTH_URL, [
+            'cookies'   => $this->cookieJar,
+            'query'     => $params,
+            'on_stats'  => function (TransferStats $stats) use (&$effectiveUri) {
+                $effectiveUri = (string)$stats->getEffectiveUri();
+            },
+        ]);
 
         $response = $this->guzzleClient->send($request);
 
         // verify sign in if needed
-        if (strpos($response->getEffectiveUrl(), 'LoginVerification') !== false) {
+        if (strpos($effectiveUri, 'LoginVerification') !== false) {
             $content = $response->getBody()->getContents();
 
             $document = new \DOMDocument();
@@ -250,22 +253,21 @@ class GoogleSession
 
             $url = substr($response->getEffectiveUrl(), 0, strpos($response->getEffectiveUrl(), '?'));
 
-            $request = $this->guzzleClient->createRequest('POST', $url, ['cookies' => $this->cookieJar]);
-            $query = $request->getQuery();
-
-
-            foreach ($params as $key => $param) {
-                $query->set($key, $param);
-            }
+            $request = new Request('POST', $url,
+                [
+                    'cookies'   => $this->cookieJar,
+                    'query'     => $params,
+                ]
+            );
 
             $response = $this->guzzleClient->send($request);
         }
 
         // update cookies
         $response = $this->guzzleClient->get('https://www.google.com/accounts/CheckCookie?chtml=LoginDoneHtml',
-            ['cookies' => $this->cookieJar],
-            ['headers' =>
-                ['Referrer' => 'https://www.google.com/accounts/ServiceLoginBoxAuth'],
+            [
+                'cookies' => $this->cookieJar,
+//                'headers' => ['Referrer' => 'https://www.google.com/accounts/ServiceLoginBoxAuth'],
             ]
         );
 
@@ -290,10 +292,15 @@ class GoogleSession
     public function checkAuth()
     {
         $response = $this->guzzleClient->get('https://accounts.google.com',
-            ['cookies' => $this->cookieJar]
+            [
+                'cookies'   => $this->cookieJar,
+                'on_stats'  => function (TransferStats $stats) use (&$effectiveUri) {
+                    $effectiveUri = (string)$stats->getEffectiveUri();
+                },
+            ]
         );
 
-        if (strpos($response->getEffectiveUrl(), 'ServiceLogin') !== false) {
+        if (strpos($effectiveUri, 'ServiceLogin') !== false) {
             return false;
         }
 
