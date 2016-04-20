@@ -1,5 +1,6 @@
 <?php namespace Jonasva\GoogleTrends;
 
+use GuzzleHttp\Psr7\Request;
 use Jonasva\GoogleTrends\GoogleSession;
 use Jonasva\GoogleTrends\GoogleTrendsResponse;
 
@@ -212,9 +213,6 @@ class GoogleTrendsRequest
      */
     public function send()
     {
-        $request = $this->guzzleClient->createRequest('GET', self::TRENDS_URL, ['cookies' => $this->session->getCookieJar()]);
-        $query = $request->getQuery();
-
         $params = [
             'hl'        =>  $this->language,
             'q'         =>  implode(',+', $this->query),
@@ -228,9 +226,12 @@ class GoogleTrendsRequest
         !$this->category ?: $params['cat'] = $this->category;
         !$this->location ?: $params['geo'] = $this->location;
 
-        foreach ($params as $key => $param) {
-            $query->set($key, $param);
-        }
+        $request = new Request('GET', self::TRENDS_URL,
+            [
+                'cookies'   => $this->session->getCookieJar(),
+                'query'     => $params,
+            ]
+        );
 
         // wait a random amount of seconds
         if ($this->session->getMaxSleepInterval() > 10) {
